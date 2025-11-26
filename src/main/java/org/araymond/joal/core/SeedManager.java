@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.HttpHost; // <--- AJOUT ICI : Import nécessaire pour le Proxy
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.config.SocketConfig;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -83,17 +84,47 @@ public class SeedManager {
         connManager.setValidateAfterInactivity(1000);
         connManager.setDefaultSocketConfig(sc);
 
-        RequestConfig requestConf = RequestConfig.custom()
+        // --- DÉBUT MODIFICATION PROXY ---
+        
+        // Création du Builder
+        RequestConfig.Builder requestConfBuilder = RequestConfig.custom()
                 .setConnectTimeout(10_000)
-                .setConnectionRequestTimeout(5000)  // timeout for requesting connection from connection manager
-                .setSocketTimeout(5000)
-                .build();
+                .setConnectionRequestTimeout(5000)
+                .setSocketTimeout(5000);
+
+        // Lecture des variables système injectées par JAVA_TOOL_OPTIONS
+        String proxyHost = System.getProperty("http.proxyHost");
+        String proxyPortStr = System.getProperty("http.proxyPort");
+
+        // Logique d'application du proxy
+        if (proxyHost != null && !proxyHost.trim().isEmpty() && proxyPortStr != null) {
+            try {
+                int proxyPort = Integer.parseInt(proxyPortStr);
+                HttpHost proxy = new HttpHost(proxyHost, proxyPort);
+                requestConfBuilder.setProxy(proxy);
+                
+                // Logs pour vérification dans Kubernetes
+                log.info("============================================================");
+                log.info("✅ JOAL HTTP Client configured with PROXY: {}:{}", proxyHost, proxyPort);
+                log.info("============================================================");
+                
+            } catch (NumberFormatException e) {
+                log.error("❌ ERROR: Invalid Proxy Port configuration: {}", proxyPortStr);
+            }
+        } else {
+            log.info("ℹ️ No Proxy configured via system properties. Using Direct Connection.");
+        }
+
+        // Construction de la config finale
+        RequestConfig requestConf = requestConfBuilder.build();
+        
+        // --- FIN MODIFICATION PROXY ---
 
         this.httpClient = HttpClients.custom()
                 .setConnectionTimeToLive(1, TimeUnit.MINUTES)
                 .setConnectionManager(connManager)
                 .setConnectionManagerShared(true)
-                .setDefaultRequestConfig(requestConf)
+                .setDefaultRequestConfig(requestConf) // Utilisation de notre config modifiée
                 .build();
     }
 
